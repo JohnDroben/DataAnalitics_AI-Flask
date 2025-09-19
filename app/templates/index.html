@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Analyzer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Georgia, 'Times New Roman', Times, serif;
+            background-color: #ffffff;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            width: 90%;
+            max-width: 1200px;
+            background-color: #f9f9f9;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        h1, h2 {
+            color: #0056b3;
+            text-align: center;
+        }
+        #upload-form {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        input[type="file"] {
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        button, select {
+            background-color: #0056b3;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: Georgia, serif;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        button:hover, select:hover {
+            background-color: #004494;
+        }
+        button:disabled {
+            background-color: #a0a0a0;
+            cursor: not-allowed;
+        }
+        #status {
+            text-align: center;
+            margin: 20px 0;
+            font-size: 1.1em;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+            color: #0056b3;
+        }
+        .centered {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .ai-placeholder {
+            background-color: #eeeeee;
+            border: 1px dashed #ccc;
+            padding: 40px;
+            text-align: center;
+            color: #888;
+            font-size: 1.2em;
+            border-radius: 8px;
+        }
+        .analysis-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .analysis-card {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .analysis-card h3 {
+            margin-top: 0;
+            color: #0056b3;
+        }
+        #chart-selector-container {
+            text-align: center;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Анализатор данных (Excel, CSV, PDF)</h1>
+
+    <div class="container">
+        <h2>1. Загрузите файл</h2>
+        <form id="upload-form">
+            <input type="file" id="file-input" name="file" accept=".xlsx, .xls, .csv, .pdf" required>
+            <button type="submit">Анализировать</button>
+        </form>
+        <div id="status"></div>
+    </div>
+
+    <div class="container" id="table-container" style="display: none;">
+        <h2>2. Просмотр данных</h2>
+        <div style="overflow-x: auto;">
+            <table id="data-table">
+                <thead id="table-head"></thead>
+                <tbody id="table-body"></tbody>
+            </table>
+        </div>
+        <div class="centered">
+            <button id="show-more" style="display: none;">Показать ещё 100 строк</button>
+        </div>
+    </div>
+
+    <div class="container" id="analysis-container" style="display: none;">
+        <h2>3. Базовая аналитика</h2>
+        <div class="analysis-grid">
+            <div id="sum-analysis" class="analysis-card"><h3>Сумма по числовым столбцам</h3></div>
+            <div id="unique-analysis" class="analysis-card"><h3>Количество уникальных значений</h3></div>
+        </div>
+    </div>
+
+    <div class="container" id="charts-container" style="display: none;">
+        <h2>4. Визуализация</h2>
+        <div id="chart-selector-container">
+            <label for="chart-type">Выберите тип диаграммы: </label>
+            <select id="chart-type"></select>
+        </div>
+        <div id="charts"></div>
+    </div>
+
+    <div class="container" id="ai-container" style="display: none;">
+        <h2>5. Анализ от нейросети</h2>
+        <div class="ai-placeholder">
+            Здесь появится вывод от нейросети
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "http://127.0.0.1:8000";
+        const uploadForm = document.getElementById('upload-form');
+        const fileInput = document.getElementById('file-input');
+        const statusDiv = document.getElementById('status');
+
+        const tableContainer = document.getElementById('table-container');
+        const tableHead = document.getElementById('table-head');
+        const tableBody = document.getElementById('table-body');
+        const showMoreBtn = document.getElementById('show-more');
+
+        const analysisContainer = document.getElementById('analysis-container');
+        const sumAnalysisDiv = document.getElementById('sum-analysis');
+        const uniqueAnalysisDiv = document.getElementById('unique-analysis');
+
+        const chartsContainer = document.getElementById('charts-container');
+        const chartSelector = document.getElementById('chart-type');
+        const chartsDiv = document.getElementById('charts');
+
+        const aiContainer = document.getElementById('ai-container');
+        const aiPlaceholder = document.querySelector('#ai-container .ai-placeholder');
+
+        let currentOffset = 0;
+        let totalRows = 0;
+        let activeChartObjects = [];
+
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const file = fileInput.files[0];
+            if (!file) {
+                statusDiv.textContent = 'Пожалуйста, выберите файл.';
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            statusDiv.textContent = 'Загрузка и обработка файла...';
+
+            resetUI();
+
+            try {
+                const response = await fetch(`${API_URL}/api/upload`, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!response.ok) {
+                    let errorDetail = 'Ошибка при загрузке файла.';
+                    try {
+                        const error = await response.json();
+                        errorDetail = error.detail || errorDetail;
+                    } catch (_) {
+                        errorDetail = `${errorDetail} Код: ${response.status}`;
+                    }
+                    throw new Error(errorDetail);
+                }
+
+                let result;
+                try {
+                    result = await response.json();
+                } catch (err) {
+                    throw new Error('Сервер вернул некорректный JSON.');
+                }
+                statusDiv.textContent = `Файл "${result.filename}" загружен. Строк: ${result.rows ?? '?'} | Колонки: ${(result.columns || []).join(', ')}`;
+
+                tableContainer.style.display = 'block';
+                analysisContainer.style.display = 'block';
+                chartsContainer.style.display = 'block';
+                aiContainer.style.display = 'block';
+
+                currentOffset = 0;
+                await loadTableData();
+                await loadAnalysisData();
+                await loadChartTypes();
+                await loadAIAnalysisPreview();
+
+            } catch (error) {
+                statusDiv.textContent = `Ошибка: ${error.message}`;
+            }
+        });
+
+        showMoreBtn.addEventListener('click', async () => {
+            currentOffset += 100;
+            await loadTableData(true);
+        });
+
+        chartSelector.addEventListener('change', () => {
+            const selectedType = chartSelector.value;
+            if (selectedType) {
+                loadChartData(selectedType);
+            }
+        });
+
+        function resetUI() {
+            tableContainer.style.display = 'none';
+            analysisContainer.style.display = 'none';
+            chartsContainer.style.display = 'none';
+            aiContainer.style.display = 'none';
+            showMoreBtn.style.display = 'none';
+            tableHead.innerHTML = '';
+            tableBody.innerHTML = '';
+            sumAnalysisDiv.innerHTML = '<h3>Сумма по числовым столбцам</h3>';
+            uniqueAnalysisDiv.innerHTML = '<h3>Количество уникальных значений</h3>';
+            chartsDiv.innerHTML = '';
+            chartSelector.innerHTML = '';
+            activeChartObjects.forEach(chart => chart.destroy());
+            activeChartObjects = [];
+        }
+
+        async function loadTableData(append = false) {
+            try {
+                const response = await fetch(`${API_URL}/api/data?offset=${currentOffset}&limit=100`);
+                if (!response.ok) throw new Error('Не удалось получить данные.');
+
+                const data = await response.json();
+                totalRows = data.total_rows;
+
+                if (!append) {
+                    const headerRow = document.createElement('tr');
+                    data.columns.forEach(col => {
+                        const th = document.createElement('th');
+                        th.textContent = col;
+                        headerRow.appendChild(th);
+                    });
+                    tableHead.appendChild(headerRow);
+                }
+
+                data.rows.forEach(row => {
+                    const tr = document.createElement('tr');
+                    data.columns.forEach(col => {
+                        const td = document.createElement('td');
+                        td.textContent = row[col];
+                        tr.appendChild(td);
+                    });
+                    tableBody.appendChild(tr);
+                });
+
+                if (currentOffset + 100 < totalRows) {
+                    showMoreBtn.style.display = 'block';
+                } else {
+                    showMoreBtn.style.display = 'none';
+                }
+
+            } catch (error) {
+                statusDiv.textContent = `Ошибка: ${error.message}`;
+            }
+        }
+
+        async function loadAnalysisData() {
+            try {
+                const response = await fetch(`${API_URL}/api/analysis`);
+                if (!response.ok) throw new Error('Не удалось получить аналитику.');
+                const data = await response.json();
+
+                let sumHtml = '<h3>Сумма по числовым столбцам</h3>';
+                for (const [col, sum] of Object.entries(data.column_sums)) {
+                    sumHtml += `<p><strong>${col}:</strong> ${sum.toLocaleString()}</p>`;
+                }
+                sumAnalysisDiv.innerHTML = sumHtml;
+
+                let uniqueHtml = '<h3>Количество уникальных значений</h3>';
+                for (const [col, count] of Object.entries(data.unique_counts)) {
+                    uniqueHtml += `<p><strong>${col}:</strong> ${count}</p>`;
+                }
+                uniqueAnalysisDiv.innerHTML = uniqueHtml;
+
+            } catch (error) {
+                analysisContainer.innerHTML = `<p>Ошибка при загрузке аналитики: ${error.message}</p>`;
+            }
+        }
+
+        async function loadAIAnalysisPreview() {
+            try {
+                // Fetch first 15 rows (or fewer if not available)
+                const response = await fetch(`${API_URL}/api/data?offset=0&limit=15`);
+                if (!response.ok) throw new Error('Не удалось получить предварительные данные.');
+                const data = await response.json();
+
+                const rowsPayload = data.rows || [];
+                if (!rowsPayload.length) {
+                    aiPlaceholder.textContent = 'Нет данных для анализа.';
+                    return;
+                }
+
+                aiPlaceholder.textContent = 'Нейросеть анализирует данные...';
+                const aiResponse = await fetch(`${API_URL}/api/ai_analyze`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(rowsPayload),
+                });
+                if (!aiResponse.ok) {
+                    const err = await aiResponse.json().catch(() => ({}));
+                    throw new Error(err.detail || 'Ошибка при запросе к нейросети.');
+                }
+                const aiData = await aiResponse.json();
+                aiPlaceholder.textContent = aiData.answer || 'Пустой ответ от нейросети.';
+            } catch (error) {
+                aiPlaceholder.textContent = `Ошибка: ${error.message}`;
+            }
+        }
+
+        async function loadChartTypes() {
+            try {
+                const response = await fetch(`${API_URL}/api/chart_types`);
+                if (!response.ok) throw new Error('Не удалось получить типы диаграмм.');
+                const data = await response.json();
+
+                chartSelector.innerHTML = '<option value="">-- Выберите диаграмму --</option>';
+                data.chart_types.forEach(type => {
+                    const option = document.createElement('option');
+                    option.value = type;
+                    option.textContent = type.charAt(0).toUpperCase() + type.slice(1); // Capitalize
+                    chartSelector.appendChild(option);
+                });
+
+                // Automatically load the first available chart type
+                if (data.chart_types.length > 0) {
+                    chartSelector.value = data.chart_types[0];
+                    loadChartData(data.chart_types[0]);
+                }
+
+            } catch (error) {
+                chartsDiv.innerHTML = `<p>Ошибка: ${error.message}</p>`;
+            }
+        }
+
+        async function loadChartData(chartType) {
+            if (!chartType) return;
+
+            try {
+                const response = await fetch(`${API_URL}/api/charts?chart_type=${chartType}`);
+                if (!response.ok) throw new Error('Не удалось получить данные для диаграмм.');
+                const charts = await response.json();
+
+                chartsDiv.innerHTML = '';
+                activeChartObjects.forEach(chart => chart.destroy());
+                activeChartObjects = [];
+
+                charts.forEach((chartConfig, index) => {
+                    const canvas = document.createElement('canvas');
+                    canvas.id = `chart-${index}`;
+                    chartsDiv.appendChild(canvas);
+
+                    const ctx = canvas.getContext('2d');
+                    const newChart = new Chart(ctx, {
+                        type: chartConfig.type,
+                        data: {
+                            labels: chartConfig.labels,
+                            datasets: chartConfig.datasets.map(ds => ({
+                                ...ds,
+                                backgroundColor: chartConfig.type === 'bar' ? 'rgba(0, 86, 179, 0.7)' : undefined,
+                                borderColor: '#0056b3',
+                                tension: 0.1
+                            }))
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                title: {
+                                    display: true,
+                                    text: chartConfig.title,
+                                    font: {
+                                        size: 18,
+                                        family: 'Georgia, serif'
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    activeChartObjects.push(newChart);
+                });
+
+            } catch (error) {
+                chartsDiv.innerHTML = `<p>Ошибка при построении диаграмм: ${error.message}</p>`;
+            }
+        }
+
+    </script>
+</body>
+</html>
