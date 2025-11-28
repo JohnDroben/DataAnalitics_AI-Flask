@@ -34,7 +34,6 @@ uploads/
 *.xls
 
 # Tests
-test_*.py
 tmp_*.py
 .pytest_cache/
 htmlcov/
