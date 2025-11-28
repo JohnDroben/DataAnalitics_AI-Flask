@@ -12,12 +12,20 @@ class ProxyAPI:
         logger.debug(f"  API Key loaded: {bool(self.api_key)}")
         if not self.api_key:
             logger.warning("  ⚠️ PROXY_API_KEY not found in environment variables!")
-        self.base_url = "https://api.proxy.ai/analyze"
-        logger.info(f"  Base URL: {self.base_url}")
+        # Allow disabling Proxy calls via env var PROXY_ENABLED (true/false)
+        enabled_raw = os.getenv('PROXY_ENABLED', 'true')
+        self.enabled = str(enabled_raw).lower() in ('1', 'true', 'yes')
+        self.base_url = os.getenv('PROXY_BASE_URL', 'https://api.proxy.ai/analyze')
+        logger.info(f"  Base URL: {self.base_url}; Enabled: {self.enabled}")
 
     def send_analysis_request(self, data):
-        logger.info(f"Sending analysis request to ProxyAPI (data size: {len(data)} chars)")
-        
+        logger.info(f"Sending analysis request to ProxyAPI (data size: {len(data)} chars); enabled={self.enabled}")
+
+        if not self.enabled:
+            error_msg = "Proxy API calls are disabled by configuration"
+            logger.warning(f"❌ {error_msg}")
+            raise Exception(error_msg)
+
         if not self.api_key:
             error_msg = "No API key available"
             logger.error(f"❌ {error_msg}")

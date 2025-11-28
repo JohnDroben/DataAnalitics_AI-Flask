@@ -117,9 +117,9 @@ class AnalysisService:
             logger.warning("  ⚠️ GigaChat API not initialized, skipping")
             giga_result = "GigaChat API not available"
 
-        # Анализ через Proxy API
+        # Анализ через Proxy API (если включён)
         proxy_result = None
-        if self.proxy_api:
+        if self.proxy_api and getattr(self.proxy_api, 'enabled', True):
             try:
                 logger.info("  🤖 Sending request to Proxy API...")
                 proxy_result = self.proxy_api.send_analysis_request(data_for_api)
@@ -128,8 +128,12 @@ class AnalysisService:
                 logger.error(f"  ❌ Proxy API error: {type(e).__name__}: {e}", exc_info=True)
                 proxy_result = f"Error: {str(e)}"
         else:
-            logger.warning("  ⚠️ Proxy API not initialized, skipping")
-            proxy_result = "Proxy API not available"
+            if self.proxy_api and not getattr(self.proxy_api, 'enabled', True):
+                logger.info("  ℹ️ Proxy API calls are disabled by configuration, skipping")
+                proxy_result = "Proxy API disabled by configuration"
+            else:
+                logger.warning("  ⚠️ Proxy API not initialized, skipping")
+                proxy_result = "Proxy API not available"
 
         # Генерация отчета
         try:
@@ -228,8 +232,8 @@ class AnalysisService:
             logger.warning("  ⚠️ GigaChat API not initialized")
             results["errors"]["giga_chat"] = "GigaChat API not initialized"
 
-        # Анализ через Proxy API
-        if self.proxy_api:
+        # Анализ через Proxy API (если включён)
+        if self.proxy_api and getattr(self.proxy_api, 'enabled', True):
             try:
                 logger.info("  🤖 Sending request to Proxy API...")
                 results["proxy_result"] = self.proxy_api.send_analysis_request(system_prompt)
@@ -239,8 +243,12 @@ class AnalysisService:
                 results["proxy_result"] = None
                 results["errors"]["proxy_api"] = str(e)
         else:
-            logger.warning("  ⚠️ Proxy API not initialized")
-            results["errors"]["proxy_api"] = "Proxy API not initialized"
+            if self.proxy_api and not getattr(self.proxy_api, 'enabled', True):
+                logger.info("  ℹ️ Proxy API calls are disabled by configuration, skipping")
+                results["proxy_result"] = "Proxy API disabled by configuration"
+            else:
+                logger.warning("  ⚠️ Proxy API not initialized")
+                results["errors"]["proxy_api"] = "Proxy API not initialized"
         
         logger.info("✅ Table analysis completed")
         return results
