@@ -1,31 +1,16 @@
 import pandas as pd
+from ..utils.logger import logger
 
 def parse_excel(file_path):
+    logger.info(f"Parsing Excel file: {file_path}")
     try:
+        logger.debug(f"  Reading Excel with pandas...")
         df = pd.read_excel(file_path)
-        return df.to_string()
+        logger.info(f"  ✅ Excel parsed successfully")
+        logger.debug(f"     Shape: {df.shape}")
+        logger.debug(f"     Columns: {list(df.columns)}")
+        return df
     except Exception as e:
-        raise ValueError(f"Ошибка при чтении Excel: {str(e)}")
-
-# app/processors/csv_parser.py
-import pandas as pd
-
-def parse_csv(file_path):
-    try:
-        df = pd.read_csv(file_path)
-        return df.to_string()
-    except Exception as e:
-        raise ValueError(f"Ошибка при чтении CSV: {str(e)}")
-
-# app/processors/pdf_parser.py
-import pdfplumber
-
-def parse_pdf(file_path):
-    try:
-        text = ""
-        with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
-                text += page.extract_text()
-        return text
-    except Exception as e:
-        raise ValueError(f"Ошибка при чтении PDF: {str(e)}")
+        error_msg = f"Ошибка при чтении Excel: {str(e)}"
+        logger.error(f"  ❌ {error_msg}", exc_info=True)
+        raise ValueError(error_msg)

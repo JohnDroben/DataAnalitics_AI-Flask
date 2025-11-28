@@ -6,6 +6,7 @@ from ..utils.logger import logger
 import pandas as pd
 import os
 from dotenv import load_dotenv
+from typing import Optional
 
 # Try to import official gigachat client (used in working bot)
 try:
@@ -53,7 +54,7 @@ class AnalysisService:
             except Exception as e:
                 logger.error(f"  ❌ Failed to initialize gigachat library client: {e}")
 
-    def analyze_file(self, file_path):
+    def analyze_file(self, file_path, session_id=None):
         logger.info(f"Starting file analysis for: {file_path}")
         logger.info(f"  File exists: {os.path.exists(file_path)}")
         logger.info(f"  File size: {os.path.getsize(file_path) if os.path.exists(file_path) else 'N/A'} bytes")
@@ -99,7 +100,7 @@ class AnalysisService:
         if self.gigachat_client:
             try:
                 logger.info("  🤖 Sending request to GigaChat via library client...")
-                giga_result = self._call_gigachat_lib(data_for_api)
+                giga_result = self._call_gigachat_lib(data_for_api, session_id=session_id)
                 logger.info(f"  ✅ GigaChat (lib) analysis complete (result length: {len(str(giga_result))} chars)")
             except Exception as e:
                 logger.error(f"  ❌ GigaChat library error: {type(e).__name__}: {e}", exc_info=True)
@@ -107,7 +108,7 @@ class AnalysisService:
         elif self.giga_api:
             try:
                 logger.info("  🤖 Sending request to GigaChat API (wrapper)...")
-                giga_result = self.giga_api.send_analysis_request(data_for_api)
+                giga_result = self.giga_api.send_analysis_request(data_for_api, session_id=session_id)
                 logger.info(f"  ✅ GigaChat analysis complete (result length: {len(str(giga_result))} chars)")
             except Exception as e:
                 logger.error(f"  ❌ GigaChat API error: {type(e).__name__}: {e}", exc_info=True)
@@ -147,7 +148,7 @@ class AnalysisService:
             "data": data
         }
 
-    def analyze_table_first_rows(self, data, rows_count=15):
+    def analyze_table_first_rows(self, data, rows_count=15, session_id=None):
         """
         Анализирует первые N строк таблицы через нейросети.
         
@@ -208,7 +209,7 @@ class AnalysisService:
         if self.gigachat_client:
             try:
                 logger.info("  🤖 Sending request to GigaChat via library client...")
-                results["giga_result"] = self._call_gigachat_lib(system_prompt)
+                results["giga_result"] = self._call_gigachat_lib(system_prompt, session_id=session_id)
                 logger.info(f"  ✅ GigaChat (lib) analysis complete (result length: {len(str(results['giga_result']))} chars)")
             except Exception as e:
                 logger.error(f"  ❌ GigaChat library error: {type(e).__name__}: {e}", exc_info=True)
@@ -217,7 +218,7 @@ class AnalysisService:
         elif self.giga_api:
             try:
                 logger.info("  🤖 Sending request to GigaChat API (wrapper)...")
-                results["giga_result"] = self.giga_api.send_analysis_request(system_prompt)
+                results["giga_result"] = self.giga_api.send_analysis_request(system_prompt, session_id=session_id)
                 logger.info(f"  ✅ GigaChat analysis complete (result length: {len(str(results['giga_result']))} chars)")
             except Exception as e:
                 logger.error(f"  ❌ GigaChat API error: {type(e).__name__}: {e}", exc_info=True)
@@ -244,10 +245,38 @@ class AnalysisService:
         logger.info("✅ Table analysis completed")
         return results
 
-    def _call_gigachat_lib(self, prompt: str):
-        """Вызов GigaChat через официальный пакет `gigachat` (синхронный)."""
+    def _call_gigachat_lib(self, prompt: str, session_id: Optional[str] = None):
+        """Вызов GigaChat через официальный пакет `gigachat` (синхронный).
+
+        При наличии `session_id` пытаемся установить его в клиентской context (если библиотека поддерживает).
+        """
         if not _HAS_GIGACHAT_LIB or not self.gigachat_client:
             raise Exception("gigachat library client not available")
+
+        # Если библиотека поддерживает context.session_id_cvar, попробуем установить
+        if session_id:
+            try:
+                ctx = getattr(self.gigachat_client, "context", None)
+                if ctx and hasattr(ctx, "session_id_cvar"):
+                    try:
+                        ctx.session_id_cvar.set(session_id)
+                        logger.debug(f"Set gigachat client context.session_id_cvar to {session_id}")
+                    except Exception:
+                        logger.debug("Unable to set session_id on gigachat client context.session_id_cvar")
+
+                # Также попытаемся установить через модульный контекст как в документации
+                try:
+                    import gigachat.context as _gctx
+                    if hasattr(_gctx, 'session_id_cvar'):
+                        try:
+                            _gctx.session_id_cvar.set(session_id)
+                            logger.debug(f"Set gigachat.context.session_id_cvar to {session_id}")
+                        except Exception:
+                            logger.debug("Unable to set session_id on gigachat.context.session_id_cvar")
+                except Exception:
+                    logger.debug("gigachat.context not available to set session_id")
+            except Exception:
+                logger.debug("gigachat client has no context/session_id_cvar attribute")
 
         # Build simple chat with system + user messages
         try:

@@ -15,47 +15,69 @@ class GigaChatAPI:
         if not self.auth_token:
             logger.warning("  ⚠️ GIGACHAT_TOKEN not found in environment variables!")
         self.access_token = None
-        self.base_url = "https://api.gigachat.ru/core/api/v1"
+        # Allow overriding base URL via env var; default to official GigaChat endpoint
+        self.base_url = os.getenv('GIGACHAT_BASE_URL', 'https://gigachat.devices.sberbank.ru/api/v1')
         logger.info(f"  Base URL: {self.base_url}")
         self._get_access_token()
 
     def _get_access_token(self):
         """Получить access token для GigaChat API"""
         logger.info("Attempting to get access token...")
-        auth_url = "https://auth.api.cloud.yandex.net/oauth/token"
-        
+        # First, if the official `gigachat` python package is installed, try to use it to get a token
+        try:
+            from gigachat import GigaChat
+            if self.auth_token:
+                logger.debug("gigachat library detected — attempting to get token via library")
+                try:
+                    giga = GigaChat(credentials=self.auth_token, verify_ssl_certs=False)
+                    # Some SDKs expose `get_token()` to exchange credentials for access token
+                    if hasattr(giga, 'get_token'):
+                        token_resp = giga.get_token()
+                        # token_resp may be dict-like
+                        if isinstance(token_resp, dict):
+                            self.access_token = token_resp.get('access_token')
+                        else:
+                            # try attribute
+                            self.access_token = getattr(token_resp, 'access_token', None)
+                        if self.access_token:
+                            logger.info("✅ Access token obtained via gigachat library")
+                            return
+                except Exception as e:
+                    logger.debug(f"gigachat library token exchange failed: {e}")
+        except Exception:
+            logger.debug("gigachat library not available for token exchange")
+
+        # Fallback: if a pre-obtained token is provided in GIGACHAT_TOKEN, use it
+        if self.auth_token:
+            logger.info("Using provided GIGACHAT_TOKEN as access token fallback")
+            self.access_token = self.auth_token
+            return
+
+        # As a last resort, try the OAuth endpoint if configured (keep for compatibility)
+        auth_url = os.getenv('GIGACHAT_OAUTH_URL', 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth')
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
             "RqUID": str(uuid.uuid4())
         }
-        
         try:
             logger.debug(f"Sending OAuth request to: {auth_url}")
-            # Используем токен как client_id для OAuth flow
-            payload = f"grant_type=client_credentials&client_id={self.auth_token}"
+            payload = "scope=GIGACHAT_API_PERS"
             response = requests.post(auth_url, headers=headers, data=payload, verify=False, timeout=10)
             logger.debug(f"OAuth response status: {response.status_code}")
             logger.debug(f"OAuth response: {response.text[:200]}")
-            
             if response.status_code == 200:
                 token_data = response.json()
                 self.access_token = token_data.get('access_token')
-                if not self.access_token:
-                    logger.warning(f"No access_token in OAuth response: {token_data}")
-                    raise Exception("No access_token in response")
-                logger.info("✅ Access token obtained via OAuth")
-            else:
-                logger.warning(f"OAuth failed with status {response.status_code}: {response.text[:500]}")
-                # Пробуем использование токена как Bearer напрямую
-                self.access_token = self.auth_token
-                logger.info("ℹ️ Using provided token directly as fallback")
+                if self.access_token:
+                    logger.info("✅ Access token obtained via OAuth endpoint")
+                    return
+            logger.warning(f"OAuth fallback failed with status {response.status_code}: {response.text[:500]}")
         except Exception as e:
-            logger.warning(f"OAuth authentication failed: {str(e)}, using token directly")
-            self.access_token = self.auth_token
+            logger.warning(f"OAuth fallback failed: {e}")
 
-    def send_analysis_request(self, data):
-        logger.info(f"Sending analysis request to GigaChat (data size: {len(data)} chars)")
+    def send_analysis_request(self, data, session_id=None):
+        logger.info(f"Sending analysis request to GigaChat (data size: {len(data)} chars) session_id={session_id}")
         
         if not self.access_token:
             logger.info("No access token, attempting to obtain...")
@@ -71,6 +93,8 @@ class GigaChatAPI:
             "Content-Type": "application/json",
             "RqUID": str(uuid.uuid4())
         }
+        if session_id is not None:
+            headers["X-Session-ID"] = session_id
 
         # Пробуем разные модели
         models = ["GigaChat", "GigaChat-Pro", "GigaChat-3.5"]
