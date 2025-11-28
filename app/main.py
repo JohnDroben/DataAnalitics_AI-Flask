@@ -368,6 +368,78 @@ def ai_analyze():
         return jsonify({"detail": "AI analysis failed"}), 500
 
 
+@app.route('/api/proxy-analyze', methods=['POST'])
+def proxy_analyze():
+    """Endpoint to analyze first up to 50 rows via Proxy API.
+
+    Expected JSON:
+    {
+        "rows": [ {..}, {..}, ... ]  # list of dicts or strings
+        "ai_name": "ProxyAI"  # optional, used in response label
+    }
+
+    Returns:
+    {
+        "status": "success",
+        "ai_name": "ProxyAI",
+        "analysis": "...",
+        "note": "Frontend should display this under: Анализ от нейросети [ai_name]"
+    }
+    """
+    logger.info("/api/proxy-analyze called")
+
+    payload = request.get_json() or {}
+    rows = payload.get('rows')
+    ai_name = payload.get('ai_name', 'ProxyAI')
+
+    if not rows or not isinstance(rows, list):
+        logger.error("proxy-analyze: no rows provided or bad format")
+        return jsonify({"status": "error", "message": "Provide 'rows' as a list of dicts or strings"}), 400
+
+    # limit to first 50 rows
+    limited = rows[:50]
+
+    # Normalize rows to string table: if dict -> convert to line with key: value; if string -> use as-is
+    lines = []
+    for r in limited:
+        if isinstance(r, dict):
+            parts = []
+            for k, v in r.items():
+                parts.append(f"{k}: {v}")
+            lines.append(" | ".join(parts))
+        else:
+            lines.append(str(r))
+
+    table_str = "\n".join(lines)
+
+    system_prompt = (
+        "Ты - аналитическая система с большим опытом. Твоя задача - анализировать\n"
+        "табличные данные, делать выводы и находить аномалии или интересные тенденции.\n"
+        "Фронт должен отображать этот ответ в блоке \"Анализ от нейросети [имя Ai]\"\n\n"
+        f"Вот первые {len(lines)} строк таблицы:\n{table_str}"
+    )
+
+    # Use ProxyAPI if available
+    if not analysis_service.proxy_api:
+        logger.error("ProxyAPI not initialized")
+        return jsonify({"status": "error", "message": "Proxy API not available"}), 503
+
+    try:
+        logger.info("Sending analysis request to ProxyAPI")
+        proxy_result = analysis_service.proxy_api.send_analysis_request(system_prompt)
+        logger.info("ProxyAPI analysis completed")
+
+        return jsonify({
+            "status": "success",
+            "ai_name": ai_name,
+            "analysis": proxy_result,
+            "note": f"Frontend should display this under: Анализ от нейросети [{ai_name}]"
+        })
+    except Exception as e:
+        logger.error(f"Proxy analyze failed: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route('/api/chart_types', methods=['GET'])
 def get_chart_types():
     # Hardcoded for now, can be dynamic based on data
